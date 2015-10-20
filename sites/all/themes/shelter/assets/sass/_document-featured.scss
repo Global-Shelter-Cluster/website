@@ -1,0 +1,77 @@
+#featured-documents {
+  position: relative;
+  color: #fff;
+  @include rem(margin-bottom, 2rem);
+
+  ul {
+    @include reset-list;
+  }
+  li {
+    overflow: hidden;
+
+    .document-title {
+      @include rem(padding, 1rem 0 0 0);
+      h2 {
+        color: #fff;
+        margin: 0;
+        @include rem(font-size, 1.1rem);
+        @include rem(margin, 0 0.65rem 0 0);
+        border: none;
+        display: inline-block;
+        word-break: break-all;
+      }
+      .size-type {
+        @include rem(font-size, 0.65rem);
+        text-transform: uppercase;
+        display: inline-block;
+
+      }
+      a {
+        @extend .not-underlined-links;
+        font-weight: bold;
+        color: $white;
+      }
+
+    }
+
+    .document-information {
+      background: darken($shelter-grey, 20%);
+
+      p {
+        @include rem(padding, 0.65rem 0);
+        @include rem(font-size, 0.80rem );
+        @include rem(margin, 0);
+        color: darken($white,17%);
+      }
+      img {
+        width: 100%;
+        float: left;
+      }
+      .image-container {
+        float: left;
+        background: $white;
+        border-right: none;
+        width: 100%;
+        display: none;
+        @include breakpoint(660px) {
+          display: block;
+          width: 23%;
+          border-right: 3px solid #000;
+        }
+      }
+      .information-container {
+        float: right;
+        width: 100%;
+        @include rem(padding, 0 0.45rem);
+        @include breakpoint(660px) {
+          width: 75%;
+        }
+      }
+
+    }
+  }
+
+  .image-document {
+    @include rem(max-height, 40rem);
+  }
+}

@@ -1,0 +1,484 @@
+<?php
+/**
+ * @file
+ * Handles all OG related funcitonalities.
+ */
+
+include_once 'cluster_og.features.inc';
+
+/**
+ *  Implements hook_entity_info_alter().
+ */
+function cluster_og_entity_info_alter(&$entity_info) {
+  $entity_info['node']['view modes']['related_response'] = array(
+    'label' => t('Related Response'),
+    'custom settings' => FALSE,
+  );
+
+  $entity_info['node']['view modes']['related_hub'] = array(
+    'label' => t('Related Hub'),
+    'custom settings' => FALSE,
+  );
+}
+
+/**
+ * Node API.
+ */
+
+/**
+ * Implements hook_node_view().
+ */
+function cluster_og_node_view($node, $view_mode) {
+  $bundle = $node->type;
+  // Group specific actions.
+  if (og_is_group_type('node', $bundle)) {
+    $node->content['join_links'] = $view_mode == 'full' ? cluster_og_join_links($node->nid) : FALSE;
+    // Get a display provider for the current view mode.
+    $group_content = GroupDisplayProvider::getDisplayProvider($node, $view_mode);
+    $node->content['editor_menu'] = $group_content->getEditorMenu();
+    $node->content['contact_members'] = $group_content->getContactMembers();
+    $node->content['featured_documents'] = $group_content->getFeaturedDocuments();
+    $node->content['key_documents'] = $group_content->getKeyDocuments();
+    $node->content['recent_documents'] = $group_content->getRecentDocuments();
+    $node->content['recent_discussions'] = $group_content->getRecentDiscussions();
+    $node->content['dashboard_menu'] = $group_content->getDashboardMenu();
+    $node->content['contextual_navigation'] = $group_content->getContextualNavigation();
+    $node->content['upcoming_event'] = $group_content->getUpcomingEvent();
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function cluster_og_node_insert($node) {
+  // Clear the menu cache to add the new region to the menu.
+  if ($node->type == 'geographic_region') {
+    menu_rebuild();
+  }
+}
+
+/**
+ * Theme API.
+ */
+
+/**
+ * Implements hook_theme().
+ */
+function cluster_og_theme() {
+  return array(
+    'cluster_og_contextual_navigation' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_og_contact_member' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_og_related_responses' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_og_related_hubs' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_og_featured_documents' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_og_recent_documents' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_og_recent_discussions' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_og_upcoming_event' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'variables' => array(
+        'all_events_link' => NULL,
+        'event_title' => NULL,
+        'event_date' => NULL,
+        'event_link' => NULL,
+      ),
+    ),
+    'cluster_og_no_upcoming_event' => array(
+      'template' => 'theme/cluster-og-no-upcoming-event',
+      'variables' => array(
+        'all_events_link' => NULL,
+      ),
+    ),
+    'cluster_og_join_links' => array(
+      'template' => 'theme/cluster-og-join-links',
+      'variables' => array(
+        'header' => t('Join This Group'),
+        'instructions' => t('Register and join this group'),
+        'link' => FALSE,
+      ),
+    ),
+    'cluster_og_hot_responses' => array(
+      'file' => 'theme/cluster_og.theme.inc',
+      'template' => 'theme/cluster-og-hot-responses',
+      'variables' => array(
+        'icons' => FALSE,
+        'responses' => FALSE,
+      ),
+    ),
+  );
+}
+
+/**
+ * Create the join or login link markup for a group that allows members to join.
+ * @return
+ *  Themed join or login link.
+ */
+function cluster_og_join_links($gid) {
+  global $user;
+  $node = node_load($gid);
+
+  // Show leave link.
+  if (og_is_member('node', $gid)) {
+
+    // Test if current user is the manager of the group.
+    if ($user->uid == $node->uid) {
+      return FALSE;
+    }
+
+    $vars = array(
+      'header' => t('Leave this group'),
+      'instructions' => t('Leave this group.'),
+      'link' => l(t('Leave'), 'group/node/' . $gid . '/unsubscribe'),
+    );
+  }
+  else {
+
+    // Test if the group is open for joining or invite only.
+    if (!og_user_access('node', $gid, 'subscribe')) {
+      return FALSE;
+    }
+
+    // Show login link.
+    if (user_is_anonymous()) {
+      $vars = array(
+        'header' => t('Login or register'),
+        'instructions' => t('Login with an existing account or create a new account to be able to join this group.'),
+        'link' => l(t('Login or register'), 'user', array('query' => array('destination' => 'node/'.$gid))),
+      );
+    }
+
+    // Show join link.
+    else {
+      $vars = array(
+        'header' => t('Join this group'),
+        'instructions' => t('Join this group.'),
+        'link' => l(t('Join'), 'group/node/' . $gid . '/subscribe'),
+      );
+    }
+  }
+
+  return theme('cluster_og_join_links', $vars);
+}
+
+/**
+ * Implements hook_preprocess_page().
+ */
+function cluster_og_preprocess_page(&$vars) {
+  module_load_include('inc', 'cluster_og', 'theme/cluster_og.theme');
+  _cluster_og_preprocess_page($vars);
+}
+
+/**
+ * Helpers.
+ */
+
+/**
+ * Returns render array for a given menu.
+ * @param $menu_name
+ *  Machine name of the required menu.
+ * @param $current_page_only
+ *  If TRUE menu is only expended for the currently viewed page / path.
+ *  If FALSE the whole menu tree is provided.
+ * @return
+ *  Regions menu render array.
+ */
+function _cluster_og_get_regions_menu($menu_name, $current_page_only = TRUE) {
+  if ($current_page_only) {
+    $tree = menu_tree_page_data($menu_name, NULL, TRUE);
+  }
+  else {
+    $tree = menu_tree_all_data($menu_name);
+  }
+  $output = menu_tree_output($tree);
+  return $output;
+}
+
+/**
+ *  Implements hook_node_presave().
+ */
+function cluster_og_node_presave($node) {
+  if ($node->type == 'geographic_region') {
+    $node->path['alias'] = _cluster_og_region_alias($node);
+
+    $node->menu['enabled'] = 1;
+    $node->menu['menu_name'] = 'menu-regions';
+    $node->menu['link_title'] = $node->title;
+    $node->menu['description'] = '';
+
+    $wrapper = entity_metadata_wrapper('node', $node);
+    $parent = $wrapper->field_parent_region->value();
+    if ($parent) {
+      $mlid = db_select('menu_links', 'ml')
+        ->condition('ml.link_path', 'node/'.$parent->nid)
+        ->condition('ml.menu_name', 'menu-regions')
+        ->fields('ml', array('mlid'))
+        ->execute()
+        ->fetchField();
+
+      if ($mlid) {
+        $node->menu['plid'] = $mlid;
+      }
+    }
+  }
+}
+
+/**
+ * Recursive function to generate a region node's alias.
+ */
+function _cluster_og_region_alias($node) {
+  $wrapper = entity_metadata_wrapper('node', $node);
+  $parent = $wrapper->field_parent_region->value();
+
+  module_load_include('inc', 'pathauto');
+  $prefix = $parent ? _cluster_og_region_alias($parent).'/' : '';
+  return $prefix . pathauto_cleanstring($node->title);
+}
+
+/**
+ * Calls node_save() on all regions, in the correct order so that the aliases and
+ * menu links get regenerated.
+ * Call this without any parameters.
+ */
+function cluster_og_regenerate_region_aliases($parent_nid = NULL) {
+  if (is_null($parent_nid)) {
+    // Delete the whole regions menu on the main call to this function.
+    menu_delete_links('menu-regions');
+  }
+
+  $query = db_select('node', 'n');
+  $query->fields('n', array('nid'))
+    ->condition('n.type', 'geographic_region')
+    ->addJoin('LEFT', 'field_data_field_parent_region', 'f', 'f.entity_type = :type AND f.entity_id = n.nid', array(':type' => 'node'));
+
+  if ($parent_nid) {
+    $query->condition('f.field_parent_region_target_id', $parent_nid);
+  }
+  else {
+    $query->isNull('f.field_parent_region_target_id');
+  }
+
+  foreach ($query->execute()->fetchCol() as $child_nid) {
+    $node = node_load($child_nid);
+    node_save($node);
+
+    cluster_og_regenerate_region_aliases($child_nid);
+  }
+}
+
+/**
+ * Returns themed the hot responses content.
+ */
+function cluster_og_hot_responses() {
+  // Get the response types terms.
+  // @TODO make this more robust to withstand term / vocab changes in the admin interface.
+  $vocab = taxonomy_vocabulary_machine_name_load('disaster_type');
+  $terms = entity_load('taxonomy_term', FALSE, array('vid' => $vocab->vid));
+  foreach ($terms as $term) {
+    $icon = str_replace(' ', '-', strtolower($term->name));
+    $term->icon_name = $icon;
+    $term->icon_class = $icon . '-icon';
+  }
+
+  // Get hot response nodes.
+  if ($nodes = _cluster_og_get_hot_responses()) {
+    $responses = array();
+    foreach ($nodes as $node) {
+      try {
+        // @TODO manage multilingual entity wrapper.
+        $wrapper = entity_metadata_wrapper('node', $node);
+        $responses[$node->nid] = array(
+          'link' => l($wrapper->label(), 'node/' . $node->nid, array('attributes' => array('title' => $wrapper->field_disaster_type->name->value()))),
+          'type' => $terms[$wrapper->field_disaster_type->value()->tid],
+        );
+      }
+      catch (EntityMetadataWrapperException $exc) {
+        watchdog(
+          'cluster_ogs',
+          'See '  . __FUNCTION__ . '() ' .  $exc->getTraceAsString(),
+           NULL,
+           WATCHDOG_ERROR
+        );
+      }
+    }
+    return array(
+      '#theme' => 'cluster_og_hot_responses',
+      '#responses' => $responses,
+      '#icons' => $terms,
+    );
+  }
+  return FALSE;
+}
+
+/**
+ * Provides a render array of a list of all the hot responses, linked to the node.
+ */
+function cluster_og_hot_responses_list() {
+  $items = array();
+  // Get hot response nodes.
+  if ($nodes = _cluster_og_get_hot_responses()) {
+    $responses = array();
+    foreach ($nodes as $node) {
+      try {
+        // @TODO manage multilingual entity wrapper.
+        $wrapper = entity_metadata_wrapper('node', $node);
+        $items[] = l($wrapper->label(), 'node/' . $node->nid);
+      }
+      catch (EntityMetadataWrapperException $exc) {
+        watchdog(
+          'cluster_ogs',
+          'See '  . __FUNCTION__ . '() ' .  $exc->getTraceAsString(),
+           NULL,
+           WATCHDOG_ERROR
+        );
+      }
+    }
+  }
+  return array(
+    '#theme' => 'item_list',
+    '#items' => $items,
+    '#suffix' => $items[] = l(t('All current operations'), 'current-operations', array('attributes' => array('class' => array('see-all')))),
+  );
+}
+
+/**
+ * EntityFieldQuery wrapper
+ * @return
+ *   All featured responses node in the nodequeue.
+ */
+function _cluster_og_get_hot_responses() {
+  $featured_responses_queue = nodequeue_load_queue_by_name('featured_responses');
+  $nodes = nodequeue_load_nodes($featured_responses_queue->qid, FALSE, 0, 0);
+
+  if (count($nodes) == 0) {
+    return FALSE;
+  }
+
+  return $nodes;
+}
+
+/**
+ * Implements hook_url_outbound_alter().
+ * Changes region URL to response URL when field_response_auto_redirect is set.
+ */
+function cluster_og_url_outbound_alter(&$path, &$options, $original_path) {
+  if (!preg_match('/^node\/(\d+)$/', $path, $matches)) {
+    // Not a "node view" path.
+    return;
+  }
+  $nid = $matches[1];
+
+  $node = node_load($nid);
+
+  if ($node->type != 'geographic_region') {
+    return;
+  }
+
+  $wrapper = entity_metadata_wrapper('node', $node);
+  if ($response = $wrapper->field_response_auto_redirect->value()) {
+    $path = drupal_get_path_alias('node/' . $response->nid);
+  }
+}
+
+/**
+ * Implements hook_init().
+ * Redirects to response page if the current is a region with field_response_auto_redirect set.
+ */
+function cluster_og_init() {
+  $node = menu_get_object();
+  if (!$node || $node->type != 'geographic_region' || arg(2)) {
+    // If arg(2) is set, then this is not the "node view" page.
+    return;
+  }
+
+  $wrapper = entity_metadata_wrapper('node', $node);
+  if ($response = $wrapper->field_response_auto_redirect->value()) {
+    drupal_goto('node/' . $response->nid);
+  }
+}
+
+/**
+ * Implements hook_menu().
+ */
+function cluster_og_menu() {
+  $items['cluster_og/groups/autocomplete'] = array(
+    'page callback' => 'cluster_og_groups_autocomplete',
+    'file' => 'cluster_og.ajax.inc',
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('administer nodes'),
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_node_access().
+ *
+ * Test if the user is allowed to manage a specific content type within the context 
+ * of the currently viewed organic group.  Managed means all operations except 'view', 'delete'.
+ */
+function cluster_og_node_access($node, $account, $op) {
+  if ($op == 'view') {
+    return NODE_ACCESS_IGNORE;
+  }
+  // Test if we are creating content in the context of a group.
+  if ($key = _cluster_context_is_being_used()) {
+    $q = drupal_get_query_parameters();
+    if (! isset($q[$key])) {
+      return NODE_ACCESS_IGNORE;
+    }
+    $gid = $q[$key];
+    $node_type = is_object($node) ? $node->type : $node;
+
+    // Test if the current user has specific permissions for the current node type being managed.
+    if (og_user_access('node', $gid, 'manage_child_' . $node_type)) {
+      // For safety, make it so that users need the global delete rights, not just og rights.
+      if ($op != 'delete') {
+        return NODE_ACCESS_ALLOW;
+      }
+    }
+  }
+  return NODE_ACCESS_IGNORE;
+}
+
+/**
+ * Implements hook_og_permission().
+ *
+ * Permissions will be checked in hook_node_grant implementation based on the assumption that the permission
+ * is named 'manage_child_CONTENT_TYPE_MACHINE_NAME'.
+ */
+function cluster_og_og_permission() {
+  return array(
+    'manage_child_hub' => array(
+      'title' => t('Manage child hub'), 
+      'description' => t("Allow user to manage child hubs."),
+    ),
+    'manage_child_strategic_advisory' => array(
+      'title' => t('Manage child strategic advisory group'), 
+      'description' => t("Allow user to manage child strategic advisory group."),
+    ),
+    'manage_child_working_group' => array(
+      'title' => t('Manage child working group'), 
+      'description' => t("Allow user to manage child technical working group."),
+    ),
+  );
+}

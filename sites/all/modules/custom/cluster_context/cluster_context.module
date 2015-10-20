@@ -1,0 +1,208 @@
+<?php
+
+include_once 'cluster_context.permissions.inc';
+include_once 'cluster_context.admin.inc';
+
+/**
+ * Generates links for the Editor Menu.
+ * @param $node
+ *  The node being viewed.
+ * @return array
+ *  Returns an array usable by theme_links() as "#links".
+ */
+function cluster_context_links($node) {
+  if (!user_is_logged_in()) {
+    // Logged out.
+    return FALSE;
+  }
+  global $user;
+  if (!og_is_member('node', $node->nid, 'user', $user)) {
+    // Current user does not belong to the group.
+    return FALSE;
+  }
+
+  $manager = GroupContentManager::getInstance($node);
+  //dpm($node);
+  $links = array();
+
+  if ($manager->isEnabled('documents')) {
+    if (node_access('create', 'document')) {
+      $links['new-document'] = array(
+        'title' => t('Create document'),
+        'href' => 'node/add/document',
+        'query' => array(
+          'group' => $node->nid,
+          'destination' => 'node/' . $node->nid
+        ),
+      );
+    }
+
+    if (node_access('create', 'library')) {
+      $links['new-library'] = array(
+        'title' => t('Create library'),
+        'href' => 'node/add/library',
+        'query' => array(
+          'group' => $node->nid,
+          'destination' => 'node/' . $node->nid
+        ),
+      );
+    }
+
+    if (node_access('create', 'arbitrary_library')) {
+      $links['new-arbitrary-library'] = array(
+        'title' => t('Create arbitrary library'),
+        'href' => 'node/add/arbitrary-library',
+        'query' => array(
+          'group' => $node->nid,
+          'destination' => 'node/' . $node->nid
+        ),
+      );
+    }
+  }
+
+  if ($manager->isEnabled('discussions') && node_access('create', 'discussion')) {
+    $links['new-discussion'] = array(
+      'title' => t('Create discussion'),
+      'href' => 'node/add/discussion',
+      'query' => array(
+        'group' => $node->nid,
+        'destination' => 'node/' . $node->nid
+      ),
+    );
+  }
+
+  if ($manager->isEnabled('events') && node_access('create', 'event')) {
+    $links['new-event'] = array(
+      'title' => t('Create event'),
+      'href' => 'node/add/event',
+      'query' => array(
+        'group' => $node->nid,
+        'destination' => 'node/' . $node->nid
+      ),
+    );
+  }
+
+  if (node_access('create', 'page')) {
+    $links['new-page'] = array(
+      'title' => t('Create page'),
+      'href' => 'node/add/page',
+      'query' => array(
+        'group' => $node->nid,
+        'destination' => 'node/' . $node->nid
+      ),
+    );
+  }
+
+  if (node_access('create', 'contact')) {
+    $links['new-contact'] = array(
+      'title' => t('Create coordination team member'),
+      'href' => 'node/add/contact',
+      'query' => array(
+        'group' => $node->nid,
+        'destination' => 'node/' . $node->nid
+      ),
+    );
+  }
+
+  switch ($node->type) {
+    case 'geographic_region':
+      if (node_access('create', 'geographic-region')) {
+        $links['new-child-region'] = array(
+          'title' => t('New child region'),
+          'href' => 'node/add/geographic-region',
+          'query' => array(
+            'region' => $node->nid,
+            'destination' => 'node/' . $node->nid
+          ),
+        );
+      }
+
+      if (!$manager->getStrategicAdvisory()) {
+        if (node_access('create', 'strategic-advisory') || og_user_access('node', $node->nid, 'manage_child_sag')) {
+          $links['new-strategic-advisory'] = array(
+            'title' => t('New strategic advisory group'),
+            'href' => 'node/add/strategic-advisory',
+            'query' => array(
+              'region' => $node->nid,
+              'destination' => 'node/' . $node->nid
+            ),
+          );
+        }
+      }
+
+      if (node_access('create', 'response')) {
+        $links['new-response'] = array(
+          'title' => t('New response'),
+          'href' => 'node/add/response',
+          'query' => array(
+            'region' => $node->nid,
+            'destination' => 'node/' . $node->nid
+          ),
+        );
+      }
+
+      break;
+    case 'response':
+      if (!$manager->getStrategicAdvisory()) {
+        if (node_access('create', 'strategic-advisory') || og_user_access('node', $node->nid, 'manage_child_sag')) {
+          $links['new-strategic-advisory'] = array(
+            'title' => t('New strategic advisory group'),
+            'href' => 'node/add/strategic-advisory',
+            'query' => array(
+              'response' => $node->nid,
+              'destination' => 'node/' . $node->nid
+            ),
+          );
+        }
+      }
+
+      if (node_access('create', 'response')) {
+        $links['new-child-response'] = array(
+          'title' => t('New child response'),
+          'href' => 'node/add/response',
+          'query' => array(
+            'response' => $node->nid,
+            'destination' => 'node/' . $node->nid
+          ),
+        );
+      }
+
+      if (node_access('create', 'hub') || og_user_access('node', $node->nid, 'manage_child_hub')) {
+        $links['new-hub'] = array(
+          'title' => t('New hub'),
+          'href' => 'node/add/hub',
+          'query' => array(
+            'response' => $node->nid,
+            'destination' => 'node/' . $node->nid
+          ),
+        );
+      }
+
+      break;
+  }
+
+  if (node_access('create', 'working_group')  || og_user_access('node', $node->nid, 'manage_child_working_group')) {
+    $links['new-working-group'] = array(
+      'title' => t('New working group'),
+      'href' => 'node/add/working-group',
+      'query' => array(
+        'response' => $node->nid,
+        'destination' => 'node/' . $node->nid
+      ),
+    );
+  }
+  return $links;
+}
+
+/**
+ * Implements hook_module_implements_alter().
+ */
+function cluster_context_module_implements_alter(&$implementations, $hook) {
+  if ($hook == 'form_alter') {
+    // Make this module's form_alter hook implementation run last, to allow modification
+    // of certain elements that are added by other modules' form_alter implementations.
+    $group = $implementations['cluster_context'];
+    unset($implementations['cluster_context']);
+    $implementations['cluster_context'] = $group;
+  }
+}

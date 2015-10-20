@@ -1,0 +1,681 @@
+<?php
+/**
+ * @file
+ * Code for the cluster_docs feature.
+ */
+
+include_once 'cluster_docs.features.inc';
+include_once 'cluster_docs.admin.inc';
+include_once 'cluster_docs.pathauto.inc';
+
+const CLUSTER_DOCS_PER_PAGE = 60;
+
+/**
+ *  Implements hook_menu().
+ */
+function cluster_docs_menu() {
+  $items['node/%/documents'] = array(
+    'title' => 'Documents',
+    'page callback' => 'cluster_docs_all',
+    'page arguments' => array(1),
+    'access callback' => 'og_is_group',
+    'access arguments' => array(0, 1),
+    'title callback' => '_cluster_docs_title_callback',
+    'title arguments' => array(1),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Menu title callback.
+ */
+function _cluster_docs_title_callback($nid) {
+  global $language;
+  $title = t('Documents');
+  if (! is_numeric($nid)) {
+    return $title;
+  }
+
+  try {
+    // @TODO manage multilingual loading of entities.
+    $wrapper = entity_metadata_wrapper('node', node_load($nid));
+    return $wrapper->label() . ' - ' . $title;
+  }
+  catch (EntityMetadataWrapperException $exc) {
+    watchdog(
+      'cluster_docs',
+      'See '  . __FUNCTION__ . '() ' .  $exc->getTraceAsString(),
+       NULL,
+       WATCHDOG_ERROR
+    );
+  }
+  return $title;
+}
+
+/**
+ * Page callback, shows a group's documents using Search API.
+ * @param $nid
+ * @return Render array
+ */
+function cluster_docs_all($nid) {
+  $query = cluster_docs_query();
+
+  $filter = $query->createFilter();
+  $filter->condition('og_group_ref', $nid);
+  $query->filter($filter);
+
+  return cluster_docs_page($query);
+}
+
+/**
+ * Returns a basic query for searching documents.
+ * @return SearchApiQueryInterface
+ */
+function cluster_docs_query() {
+  $query = search_api_query('default_node_index', array());
+
+  $filter = $query->createFilter();
+  $filter->condition('type', 'document');
+  $query->filter($filter);
+
+  return $query;
+}
+
+/**
+ * Returns a list of taxonomy term fields used as facets in document list pages.
+ * @return array
+ */
+function cluster_docs_taxonomies() {
+  return array(
+    'field_document_type',
+    // Basic tags
+    'field_coordination_management',
+    'field_information_management',
+    'field_technical_support_design',
+    // Advanced tags
+    'field_assess_monitor_eval',
+    'field_inter_cluster',
+    'field_cross_cutting_issues',
+    'field_response_phase',
+    'field_intervention_materials',
+    'field_intervention_programming',
+    'field_settlement_type',
+    'field_non_food_items',
+    'field_issues',
+    'field_toolkit',
+    'field_meeting_management',
+  );
+}
+
+/**
+ * Build a document list page. Returns a render array with the table, pager and
+ * facets.
+ * @param SearchApiQueryInterface $query
+ * @param bool $show_facets
+ * @param string|null $default_sort
+ * @param string|null $default_sort_direction
+ * @param array $excluded_facets
+ * @return array
+ */
+function cluster_docs_page($query, $show_facets = TRUE, $default_sort = NULL, $default_sort_direction = NULL, $excluded_facets = array()) {
+  // Figure out the sort column and direction from $_GET (store in $sort_key and $sort_direction).
+  $sort_options = array(
+    'title' => 'title_field',
+    'size' => 'field_file:file:size',
+    'date' => 'field_report_meeting_date',
+  );
+  $sort_key = $default_sort;
+  $sort_direction = isset($_GET['sort_direction'])
+    ? ($_GET['sort_direction'] == 'DESC' ? 'DESC' : 'ASC')
+    : ($default_sort_direction ? $default_sort_direction : 'ASC');
+
+  if (isset($_GET['sort']) && array_key_exists(strtolower($_GET['sort']), $sort_options)) {
+    $sort_key = strtolower($_GET['sort']);
+  }
+
+  if ($sort_key) {
+    $sort_field = $sort_options[$sort_key];
+
+    // Tell the actual query the sort criteria
+    $query->sort($sort_field, $sort_direction);
+  }
+
+  // Build "query" params for the header links.
+  $sort_link_params = array();
+  foreach ($sort_options as $key => $data) {
+    $params = array(
+      'sort' => $key,
+    );
+    if (isset($_GET['f'])) {
+      $params['f'] = $_GET['f'];
+    }
+
+    if ($sort_key == $key && $sort_direction == 'ASC') {
+      // Already sorting in ASC, next click turns it into DESC
+      $params['sort_direction'] = 'DESC';
+    }
+    elseif ($sort_key == $key && $sort_direction == 'DESC') {
+      // Sorting in DESC, next click disables sorting altogether
+      unset($params['sort']);
+    }
+
+    $sort_link_params[$key] = $params;
+  }
+
+  // Pagination
+  $offset = pager_find_page() * CLUSTER_DOCS_PER_PAGE;
+  $query->range($offset, CLUSTER_DOCS_PER_PAGE);
+
+  // Execute the actual query using Search API
+  $results = $query->execute();
+
+  // This is necessary for the pager to work
+  pager_default_initialize($results['result count'], CLUSTER_DOCS_PER_PAGE);
+
+  // "Reset filters" link (shown in two places)
+  $reset_link_bottom = $reset_link = FALSE;
+  if (isset($_GET['f'])) {
+    $reset_link_bottom = $reset_link = array(
+      '#theme' => 'link',
+      '#text' => 'reset filters',
+      '#path' => current_path(),
+      '#options' => array(
+        'html' => FALSE,
+        'attributes' => array('class' => 'reset-filters'),
+      ),
+    );
+    $reset_link_bottom['#prefix'] = '<small>';
+    $reset_link_bottom['#suffix'] = '</small>';
+  }
+
+  // Facets
+  $facets = array();
+
+  if ($show_facets) {
+    // This array defines which facets to show and in what order.
+    $facets_to_show = array_diff(cluster_docs_taxonomies(), $excluded_facets);
+
+    foreach (facetapi_get_block_info(array('block')) as $delta => $info) {
+      $block_view = module_invoke('facetapi', 'block_view', $delta);
+      if (is_null($block_view)) {
+        continue;
+      }
+      $content = $block_view['content'];
+
+      $facet = $content['#settings']->facet;
+      if (!in_array($facet, $facets_to_show)) {
+        continue;
+      }
+
+      $content['#options'] = $content[$facet];
+
+      $content['#theme'] = 'cluster_docs_facet';
+      $content['#weight'] = array_search($facet, $facets_to_show);
+
+      $facets[$delta] = $content;
+    }
+
+    $title = NULL;
+    // Read the title filter value from the URL, if it exists.
+    if (isset($_GET['f']) && is_array($_GET['f'])) {
+      foreach ($_GET['f'] as $filter) {
+        if (substr($filter, 0, 6) == 'title:') {
+          $title = substr($filter, 6);
+        }
+      }
+    }
+
+    $facets[] = array(
+      '#weight' => -50,
+      '#theme' => 'cluster_docs_facet',
+      '#title' => 'Title Contains',
+      '#options' => FALSE,
+      '#child' => array(
+        array(
+          '#type' => 'textfield',
+          '#name' => 'title',
+          '#value' => $title,
+        ),
+        array(
+          '#type' => 'button',
+          '#name' => 'title_search',
+          '#value' => 'Search',
+        ),
+        '#prefix' => '<div class="clearfix">',
+        '#suffix' => '</div>',
+      ),
+    );
+  }
+
+  drupal_add_js(drupal_get_path('module', 'cluster_docs') . '/js/search.js');
+
+  $result_nids = FALSE;
+  if (isset($results['results'])) {
+    $result_nids = array_keys($results['results']);
+  }
+
+  $ret = array(
+    array(
+      '#theme' => 'cluster_docs_table_list',
+      '#heading' => t('Documents') . ' (' . $results['result count'] . ')',
+      '#docs' => $result_nids ? cluster_docs_prepare_row_data($result_nids) : FALSE,
+      '#reset_link' => $reset_link ? render($reset_link) : NULL,
+      '#sort_link_params' => $sort_link_params,
+      '#sort_column' => $sort_key,
+      '#sort_direction' => $sort_direction,
+    ),
+    'pager' => array('#theme' => 'pager'),
+  );
+
+  if ($show_facets) {
+    $ret['side-column'] = array(
+      '#prefix' => '<section class="facets">',
+      '#suffix' => '</section>',
+      'facets' => $facets,
+      'reset_link' => $reset_link_bottom,
+    );
+  };
+
+  return $ret;
+}
+
+/**
+ *  Get all key docs for a group, grouped by category.
+ * @param $gid
+ *  Group node id.
+ * @return
+ *  Renderable array of documents grouped by vocabulary and displayed as cards.
+ */
+function cluster_docs_get_grouped_key_docs($gid) {
+  // Use the field_group module API to generate a list of categories.
+  $info = field_group_info_groups('node', 'document', 'form', TRUE);
+  $basic_tag_fields = $info['group_basic_tags']->children;
+  $advanced_tag_fields = $info['group_advanced_tags']->children;
+  $categories = array_merge($basic_tag_fields, $advanced_tag_fields);
+
+  $grouped_docs = array();
+  foreach ($categories as $category_field) {
+    $query = new EntityFieldQuery();
+    $res = $query->entityCondition('entity_type', 'node')
+      ->entityCondition('bundle', 'document')
+      ->fieldCondition('og_group_ref', 'target_id', $gid)
+      ->fieldCondition('field_featured', 'value', 1, '!=')
+      ->fieldCondition('field_key_document', 'value', 1)
+      ->fieldCondition($category_field, 'tid', 'NULL', '!=')
+      ->propertyCondition('status', NODE_PUBLISHED)
+      ->execute();
+
+    if (isset($res['node'])) {
+      // Get the vocabulary associated with this field.
+      $info = field_info_field($category_field);
+      $vocab_machine_name = $info['settings']['allowed_values'][0]['vocabulary'];
+      $vocab = taxonomy_vocabulary_machine_name_load($vocab_machine_name);
+      $grouped_docs[] = array(
+        '#theme' => 'cluster_docs_cards_list',
+        '#heading' => $vocab->name,
+        '#docs' => cluster_docs_prepare_card_data(array_keys($res['node'])),
+      );
+    }
+  }
+  return $grouped_docs;
+}
+
+/**
+ * Prepare the data for document cards.
+ * @param $nids
+ *  Document node ids.
+ * @return
+ *  Array of document data ready to be used in cards lists.
+ */
+function cluster_docs_prepare_card_data($nids) {
+  $docs = array();
+  $properties = array('title', 'link', 'link_url', 'is_link', 'is_file', 'is_file_class', 'description', 'filesize',
+    'file_extension', 'is_image', 'image_uri', 'has_preview', 'preview_uri', 'source',);
+
+  // @TODO language negocitation.
+  global $language;
+  $langcode = $language->language;
+  foreach (node_load_multiple($nids) as $node) {
+    // Set default values.
+    $doc = array_fill_keys($properties, FALSE);
+    try {
+
+      // @TODO insert language negociation in info array.
+      $wrapper = entity_metadata_wrapper('node', $node);
+      $doc['title'] = $wrapper->label();
+
+      $url = cluster_docs_get_download_url($node);
+      $doc['link_url'] = $url;
+      $doc['link'] = l('<span>' . $doc['title'] . '</span>', $url, array('attributes' => array('target' => '_blank'),'html' => TRUE));
+
+      // Prepare the description.
+      $desc = '';
+      if ($body = $wrapper->body->value()) {
+        // Use user supplied summary if available.
+        if($body['safe_summary']) {
+          $desc = $body['safe_summary'];
+        }
+        // Create summary.
+        elseif ($body['safe_value']) {
+          $alter = array(
+            // @TODO get this value from the body field settings.
+            'max_length' => 100,
+            'ellipsis' => TRUE,
+            'word_boundary' => TRUE,
+            'html' => TRUE,
+          );
+          $desc = views_trim_text($alter, $body['safe_value']);
+        }
+      }
+      $doc['description'] = $desc;
+
+      // Test if this document is a file field.
+      if ($file = $wrapper->field_file->value()) {
+        $doc['is_file'] = TRUE;
+        $doc['is_file_class'] = '';
+        if ($doc['is_file']) {
+          $doc['is_file_class'] = 'local-file';
+        }
+
+        $file_extension = pathinfo($file['filename'], PATHINFO_EXTENSION);
+        $doc['file_extension'] = l($file_extension, $url, array('attributes' => array('target' => '_blank')));
+
+        // Test if the attached file is an image.
+        // @TODO the image file will probably not be the actual document file.
+        switch ($file_extension) {
+          case 'png':
+          case 'jpg':
+          case 'gif':
+            $doc['is_image'] = TRUE;
+            $doc['image_uri'] = $file['uri'];
+            break;
+        }
+        $doc['filesize'] = number_format($file['filesize'] / 1048576, 2);
+      }
+
+      // Test if this document has a preview image.
+      if ($file = $wrapper->field_preview->value()) {
+        $doc['has_preview'] = TRUE;
+        $doc['preview_uri'] = $file['uri'];
+      }
+
+      // Test if this document is a link field.
+      if ($link = $wrapper->field_link->value()) {
+        $doc['is_link'] = TRUE;
+      }
+
+      // Set the source value.
+      if ($source = $wrapper->field_document_source->value()) {
+        $doc['source'] = $source;
+      }
+
+      $docs[] = $doc;
+
+    }
+    catch (EntityMetadataWrapperException $exc) {
+      watchdog(
+        'cluster_docs',
+        'See '  . __FUNCTION__ . '() ' .  $exc->getTraceAsString(),
+         NULL,
+         WATCHDOG_ERROR
+      );
+    }
+  }
+  return $docs;
+}
+
+function cluster_docs_get_download_url($node) {
+  if ($node->type != 'document') {
+    return;
+  }
+
+  $wrapper = entity_metadata_wrapper('node', $node);
+  if ($file = $wrapper->field_file->value()) {
+    return file_create_url($file['uri']);
+  }
+  else {
+    return $wrapper->field_link->url->value();
+  }
+}
+
+/**
+ * Prepare the data for document table rows.
+ * @param $nids
+ *  Document node ids.
+ * @return
+ *  Array of document data ready to be used in cards lists.
+ */
+function cluster_docs_prepare_row_data($nids) {
+  $docs = array();
+  $properties = array('title', 'link', 'link_url', 'is_link', 'is_file', 'is_file_class', 'description', 'filesize',
+    'file_extension', 'is_image', 'image_uri', 'has_preview', 'preview_uri', 'source',);
+
+  global $language;
+  $langcode = $language->language;
+  foreach (node_load_multiple($nids) as $node) {
+    // Set default values.
+    $doc = array_fill_keys($properties, FALSE);
+    try {
+
+      // @TODO insert language negociation in info array.
+      $wrapper = entity_metadata_wrapper('node', $node);
+      $wrapper->language($language->language);
+      $doc['title'] = $wrapper->label();
+
+      $url = cluster_docs_get_download_url($node);
+      $doc['link_url'] = $url;
+      $doc['link'] = l($doc['title'], $url, array('attributes' => array('target' => '_blank')));
+      $doc['edit_link'] = node_access('update', $node) ? l('edit', 'node/'.$node->nid.'/edit') : '';
+
+      // Prepare the description.
+      $desc = '';
+      if ($body = $wrapper->body->value()) {
+        // Use user supplied summary if available.
+        if($body['safe_summary']) {
+          $desc = $body['safe_summary'];
+        }
+        // Create summary.
+        elseif ($body['safe_value']) {
+          $alter = array(
+            // @TODO get this value from the body field settings.
+            'max_length' => 100,
+            'ellipsis' => TRUE,
+            'word_boundary' => TRUE,
+            'html' => TRUE,
+          );
+          $desc = views_trim_text($alter, $body['safe_value']);
+        }
+      }
+      $doc['description'] = $desc;
+
+      // Test if this document is a file field.
+      if ($file = $wrapper->field_file->value()) {
+        $doc['is_file'] = TRUE;
+        $doc['is_file_class'] = '';
+        if ($doc['is_file']) {
+          $doc['is_file_class'] = 'local-file';
+        }
+
+        $file_extension = pathinfo($file['filename'], PATHINFO_EXTENSION);
+        $doc['file_extension'] = l($file_extension, $url, array('attributes' => array('target' => '_blank')));
+
+        // Test if the attached file is an image.
+        // @TODO the image file will probably not be the actual document file.
+        switch ($file_extension) {
+          case 'png':
+          case 'jpg':
+          case 'gif':
+            $doc['is_image'] = TRUE;
+            $doc['image_uri'] = $file['uri'];
+            break;
+        }
+        $doc['filesize'] = number_format($file['filesize'] / 1048576, 2);
+      }
+
+      // Test if this document has a preview image.
+      if ($file = $wrapper->field_preview->value()) {
+        $doc['has_preview'] = TRUE;
+        $doc['preview_uri'] = $file['uri'];
+      }
+
+      // Test if this document is a link field.
+      if ($link = $wrapper->field_link->value()) {
+        $doc['is_link'] = TRUE;
+      }
+
+      // Set the report/meeting date.
+      $report_meeting_date = $wrapper->field_report_meeting_date->value();
+      $doc['date'] = $report_meeting_date ? format_date($report_meeting_date, 'custom', 'Y/m/d') : NULL;
+
+      // Set the publication date.
+      $doc['publication_date'] = format_date($node->created, 'custom', 'Y/m/d');
+
+      $docs[] = $doc;
+
+    }
+    catch (EntityMetadataWrapperException $exc) {
+      watchdog(
+        'cluster_docs',
+        'See '  . __FUNCTION__ . '() ' .  $exc->getTraceAsString(),
+         NULL,
+         WATCHDOG_ERROR
+      );
+    }
+  }
+  return $docs;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function cluster_docs_permission() {
+  return array(
+    'view document full node' => array(
+      'title' => t('View documents full view mode.'),
+      'description' => t('Access document nodes in full page view mode.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function cluster_docs_node_view($node, $view_mode) {
+  if ($node->type == 'document' && $view_mode == 'full' && ! user_access('view document full node')) {
+    drupal_access_denied();
+  }
+}
+
+/**
+ * Implements hook_preprocess_search_result().
+ */
+function cluster_docs_preprocess_search_result(&$vars) {
+  if (!isset($vars['result']['node'])) {
+    return;
+  }
+
+  $node = $vars['result']['node'];
+  if ($node->type != 'document') {
+    return;
+  }
+
+  if (user_access('view document full node')) {
+    return;
+  }
+
+  $vars['url'] = cluster_docs_get_download_url($node);
+}
+
+/**
+ * Implements hook_theme().
+ */
+function cluster_docs_theme() {
+  return array(
+    'cluster_docs_all' => array(
+      'file' => 'theme/cluster_docs.theme.inc',
+      'render element' => 'element',
+    ),
+    'cluster_docs_cards_list' => array(
+      'variables' => array(
+        'heading' => FALSE,
+        'docs' => array(),
+        'all_documents_link' => FALSE,
+      ),
+      'template' => 'theme/cluster-docs-cards-list'
+    ),
+    'cluster_docs_table_list' => array(
+      'variables' => array(
+        'heading' => FALSE,
+        'docs' => array(),
+        'all_documents_link' => FALSE,
+        'reset_link' => FALSE,
+        'sort_link_params' => array(),
+        'sort_column' => array(),
+        'sort_direction' => array(),
+      ),
+      'template' => 'theme/cluster-docs-table-list'
+    ),
+    'cluster_docs_featured_documents' => array(
+      'variables' => array(
+        'docs' => array(),
+      ),
+      'template' => 'theme/cluster-docs-featured-documents'
+    ),
+    // @TODO more general for any link.
+    'cluster_docs_all_docs_link' => array(
+      'variables' => array(
+        'path' => FALSE,
+        'text' => t('Browse all documents'),
+        'class' => 'browse-all-documents',
+      ),
+      'file' => 'theme/cluster_docs.theme.inc',
+    ),
+    'cluster_docs_facet' => array(
+      'variables' => array(
+        'title' => FALSE,
+        'options' => array(),
+        'child' => array(),
+      ),
+      'file' => 'theme/cluster_docs.theme.inc',
+    )
+  );
+}
+
+/**
+ * Implements hook_node_presave().
+ */
+function cluster_docs_node_presave($node) {
+  if ($node->type != 'document') {
+    return;
+  }
+
+  if ($node->nid) {
+    //Only do this for new nodes.
+    return;
+  }
+
+  $wrapper = entity_metadata_wrapper('node', $node);
+
+  $groups = $wrapper->og_group_ref->value();
+  $responses = array();
+  $new_groups = array();
+  foreach ($groups as $group) {
+    if ($group->type == 'response') {
+      $responses[] = $group->nid;
+    }
+    if (!in_array($group->type, array('working_group', 'hub', 'strategic_advisory'))) {
+      continue;
+    }
+    $group_wrapper = entity_metadata_wrapper('node', $group);
+    $parent_response = $group_wrapper->field_parent_response->value();
+    if ($parent_response && !in_array($parent_response->nid, $responses)) {
+      $new_groups[] = $parent_response;
+      $responses[] = $parent_response->nid;
+    }
+  }
+
+  if ($new_groups) {
+    $wrapper->og_group_ref->set(array_merge($groups, $new_groups));
+  }
+}

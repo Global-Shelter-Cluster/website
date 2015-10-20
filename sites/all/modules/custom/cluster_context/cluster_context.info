@@ -1,0 +1,9 @@
+name = Cluster Context
+description = Context awareness logic.
+core = 7.x
+package = Cluster
+dependencies[] = cluster_og
+dependencies[] = cluster_docs
+dependencies[] = cluster_discussions
+dependencies[] = cluster_events
+dependencies[] = cluster_libraries

@@ -1,0 +1,119 @@
+.front {
+  #site-options-bar {
+    margin-bottom: 0;
+  }
+  #user-profile-container {
+    position: absolute;
+    right: 5%;
+    top: 85px;
+    color: $white;
+    padding: 0;
+
+    a {
+      color: $white;
+    }
+    @include breakpoint(800px) {
+      right: 45px;
+      top: 48px;
+    }
+  }
+  .video-container {
+    @include rem(margin, 0.5rem 0 1.5rem 0);
+  }
+  #site-branding {
+    height: 160px;
+    margin: 0;
+
+    .page-margin {
+      background: url(../images/homepage-header.jpg) no-repeat 0% top;
+      height: 160px;
+
+      @include breakpoint(800px) {
+        background-position: top center;
+      }
+    }
+    #logo-shelter-cluster .svg{
+      top: -5px;
+      left: 5%;
+      max-width: 92%;
+
+      @include breakpoint(800px) {
+        top: 28px;
+        left: 35px;
+      }
+    }
+    .search {
+      bottom: 0px;
+      right: 5%;
+
+      @include breakpoint(800px) {
+        bottom: 38px;
+        right: 45px;
+      }
+    }
+    #shelter-cluster {
+      polygon {
+        fill: $white;
+      }
+      path {
+        fill: $white;
+      }
+      .second-color {
+        fill: #cfd0d2;
+      }
+    }
+  }
+  #secondary-nav {
+    margin-bottom: 20px;
+  }
+  .main-content {
+    width: 100%;
+    display: inline-block;
+    vertical-align: top;
+
+    h2 {
+      font-weight: normal;
+    }
+
+    @include breakpoint(900px) {
+      width: 53%;
+    }
+    @include breakpoint(1100px) {
+      width: 60%;
+    }
+  }
+  #shelter-calendar {
+    #box-calendar {
+      width: 100%;
+      margin: 0 auto;
+    }
+  }
+  #twitter-timeline {
+    margin: 0 auto;
+    width: 100%;
+    margin-bottom: 20px;
+    display: inline-block;
+    text-align: center;
+  }
+  .posters {
+    list-style: none;
+    padding: 0;
+    @include rem(margin, 0 0 2rem 0);
+
+    .poster {
+      width: 100%;
+      float: left;
+      @include rem(margin, 0 0 1rem 0);
+
+      img {
+        width: 100%;
+        height: auto;
+        float: left;
+      }
+      @include breakpoint(500px) {
+        @include rem(margin, 0 0 1rem 1rem);
+        width: 46%;
+      }
+    }
+  }
+}
